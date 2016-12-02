@@ -1,0 +1,188 @@
+#!/usr/bin/python3
+
+from PyQt5.QtCore import pyqtSlot, QUrl
+from PyQt5.QtGui import QKeySequence
+from PyQt5.QtWidgets import (QAction, QApplication, QMainWindow, QMessageBox,
+        QWidget, QVBoxLayout)
+from PyQt5.QtWebKitWidgets import QWebPage, QWebView
+from PyQt5.QtWebKit import QWebElement
+from shutil import copyfile
+
+import os
+import sys
+import subprocess
+import argparse
+
+class phpCliBrowser(QMainWindow):
+
+    # The browser's python script directory:
+    browserDir = os.path.dirname(os.path.abspath(__file__))
+    
+    # The PHP Script directory:
+    scriptDir = browserDir
+
+    # Current working directory - PHP Script and working directories may be different
+    # since local programs may be designed to perform tasks on other than php scrip
+    # location
+    cwd = os.getcwd()
+
+    # Cache directory - where the phpCliBroser stores resulted html from php cli commands:
+    cacheDir = os.path.expanduser('~') + os.path.sep + '.phpCliBrowser' + os.path.sep + 'cache'
+
+    def __init__(self):
+        super(phpCliBrowser, self).__init__()
+
+        # Make sure cache directory exists. In it we compile and store result html file
+        if not os.path.isdir(self.cacheDir):
+            os.makedirs(self.cacheDir)
+
+        # Copy globals.php script to cache directory so that it will simplify the inclusion
+        # of POST/GET/SESSION variables
+        if not os.path.isfile(self.cacheDir + os.path.sep + 'globals.php'):
+            copyfile(self.browserDir + os.path.sep + 'globals.php', self.cacheDir + os.path.sep + 'globals.php')
+
+        # Read program's command line arguments
+        self.parse_args()
+
+        # Start browser window pointing to php program index
+        self.wb = QWebView(self)
+        self.outputPhpScript(self.index)
+        self.setCentralWidget(self.wb)
+
+    # Checks if php link is available in the PHP script directory.
+    def isPhpAvailable(self, phpFileName):
+        src = phpFileName.replace('file://' + self.cacheDir + os.path.sep, '')
+        fullPath = self.scriptDir + os.path.sep + src
+        if os.path.isfile(fullPath):
+            return fullPath
+        return False
+
+    # Execute a php script (or load html file) from php script directory
+    def outputPhpScript(self, phpFileName):
+        fullPath = self.isPhpAvailable(phpFileName)
+        globalsPath = self.cacheDir + os.path.sep + 'globals.php';
+        sessionFile = self.cacheDir + os.path.sep + '' + self.session_file_name;
+        if fullPath:
+            php = 'define(\'PHP_SCRIPT_PATH\', \\"'+self.scriptDir+'\\"); define(\'BROWSER_PATH\', \\"'+self.browserDir+'\\");'
+            php += 'require(\'' + globalsPath + '\'); include(\'' + fullPath + '\');'
+            php += 'file_put_contents(\'' + sessionFile + '\', serialize(\$_SESSION));';
+            cmd = 'php -r "' + php + '"'
+            self.parseBash(cmd)
+        else:
+            self.parseBash('echo "Cannot find file \'' + fullPath + '\'"')
+        self.wb.setUrl(QUrl('file://' + self.cacheDir + os.path.sep + 'index.html'))
+        
+        self.wb.page().mainFrame().javaScriptWindowObjectCleared.connect(
+                self.populateJavaScriptWindowObject)
+
+    # Parse arguments
+    def parse_args(self):
+        p = argparse.ArgumentParser()
+        p.add_argument('-s', default=self.scriptDir + os.path.sep + 'example', help="Directory from where php script is served")
+        p.add_argument('-d', default=self.cwd, help="Program working directory")
+        p.add_argument('-i', default='index.php', help="Index file for php source")
+        p.add_argument('-k', default='default.session', help="Session file name")
+        args = p.parse_args()
+        self.scriptDir = args.s
+        self.cwd = args.d
+        self.index = args.i
+        self.session_file_name = args.k
+
+    # Executes a bash command and outputs the result into index.html cache file
+    def parseBash(self, bashCommand, fname='index.html'):
+        os.system(bashCommand + ' > ' + self.cacheDir + os.path.sep + '' + fname)
+
+    # Injects into browser's window phpCliBrowser class
+    def populateJavaScriptWindowObject(self):
+        self.wb.page().mainFrame().addToJavaScriptWindowObject(
+                'phpCliBrowser', self)
+        formElements = self.wb.page().mainFrame().findAllElements('form')
+        if formElements:
+            for f in formElements:
+                if not f.hasAttribute('onsubmit'):
+                    f.setAttribute('onsubmit', "phpCliBrowser.submit(this);return false;")
+                else:
+                    print(onsubmit)
+        aElements = self.wb.page().mainFrame().findAllElements('a')
+        if aElements:
+            for a in aElements:
+                if a.hasAttribute('href'):
+                    href = a.evaluateJavaScript('this.href')
+                    a.setAttribute('href', 'javascript:phpCliBrowser.goto("' + href + '");')
+
+    # Provides java script function to replace hrefs of A tags.
+    @pyqtSlot(str)
+    def goto(self, dest):
+        parts = dest.split('?')
+        if len(parts) > 1:
+            fname = 'get.php'
+            dest = self.cacheDir + os.path.sep + '' + fname
+            os.system('echo "<?php" > ' + dest)
+            os.system('echo "\$_GET = array(" >> ' + dest)
+            args = parts[1].split('#')
+            args = args[0].split('&')
+            for g in args:
+                gg = g.split("=")
+                if len(gg) > 1:
+                    os.system('echo "   \'' + gg[0] + '\' => \\"' +gg[1]+ '\\"," >> ' + dest)
+                else:
+                    os.system('echo "   \'' + gg[0] + '\' => \\"\\"," >> ' + dest)
+            os.system('echo ");" >> ' + dest)
+            os.system('echo "?>" >> ' + dest)
+        self.outputPhpScript(parts[0])
+
+
+    # Provides java script function to read form fields and translate values to php array.
+    @pyqtSlot(QWebElement)
+    def submit(self, el):
+        inputs = el.findAll('input')
+        act = el.evaluateJavaScript('this.action')
+        vals = {}
+        for i in inputs:
+            elType = i.evaluateJavaScript('this.type');
+            elName = i.evaluateJavaScript('this.name');
+            elVal = i.evaluateJavaScript('this.value');
+            if not elVal:
+                elVal = False
+            if (elType == 'radio'):
+                if (i.evaluateJavaScript('this.checked')):
+                    if (elVal):
+                        vals[elName] = elVal
+            elif elType == 'checkbox':
+                if (i.evaluateJavaScript('this.checked')):
+                    if elVal:
+                        vals[elName] = elVal
+                    else:
+                        vals[elName] = True
+                else:
+                    vals[elName] = False
+            elif not elType or elType == 'submit':
+                pass
+            else:
+                vals[elName] = elVal
+
+        self.savePostVars(vals)
+        self.outputPhpScript(act)
+
+    # Saves variables posted by forms:
+    def savePostVars(self, vals):
+        fname = 'post.php'
+        dest = self.cacheDir + os.path.sep + '' + fname
+        os.system('echo "<?php" > ' + dest)
+        os.system('echo "\$_POST = array(" >> ' + dest)
+        for k, v in vals.items():
+            os.system('echo "   \'' + k + '\' => \\"' + str(v) + '\\"", >> ' + dest)
+        os.system('echo ");" >> ' + dest)
+        os.system('echo "?>" >> ' + dest)
+
+if __name__ == '__main__':
+
+    import sys
+
+    app = QApplication(sys.argv)
+
+    mainWindow = phpCliBrowser()
+    mainWindow.setWindowTitle("PHP Browser")
+    mainWindow.show()
+
+    sys.exit(app.exec_())
