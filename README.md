@@ -32,7 +32,7 @@ phpclibrowser -s "path/to/php/script"
 To run in specific working directory:
 
 ```bash
-phpclibrowser -s "path/to/php/script" -s "path/to/working/direcory"
+phpclibrowser -s "path/to/php/script" -d "path/to/working/direcory"
 ```
 
 One may provide a session key to store session variables for particular
