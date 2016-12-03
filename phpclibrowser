@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-from PyQt5.QtCore import pyqtSlot, QUrl
+from PyQt5.QtCore import *
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import (QAction, QApplication, QMainWindow, QMessageBox,
         QWidget, QVBoxLayout)
@@ -32,6 +32,7 @@ class phpCliBrowser(QMainWindow):
     def __init__(self):
         super(phpCliBrowser, self).__init__()
 
+
         # Make sure cache directory exists. In it we compile and store result html file
         if not os.path.isdir(self.cacheDir):
             os.makedirs(self.cacheDir)
@@ -46,7 +47,9 @@ class phpCliBrowser(QMainWindow):
 
         # Start browser window pointing to php program index
         self.wb = QWebView(self)
+        self.wb.loadFinished.connect(self.onLoadFinished)
         self.outputPhpScript(self.index)
+
         self.setCentralWidget(self.wb)
 
     # Checks if php link is available in the PHP script directory.
@@ -56,6 +59,12 @@ class phpCliBrowser(QMainWindow):
         if os.path.isfile(fullPath):
             return fullPath
         return False
+
+    def onLoadFinished(self): 
+        self.wb.page().mainFrame().javaScriptWindowObjectCleared.connect(
+                self.populateJavaScriptWindowObject)
+        
+        self.injectJSLinksFormsRewrite()
 
     # Execute a php script (or load html file) from php script directory
     def outputPhpScript(self, phpFileName):
@@ -69,11 +78,9 @@ class phpCliBrowser(QMainWindow):
             cmd = 'php -r "' + php + '"'
             self.parseBash(cmd)
         else:
-            self.parseBash('echo "Cannot find file \'' + fullPath + '\'"')
+            self.parseBash('echo "Cannot find file \'' + phpFileName + '\'"')
+
         self.wb.setUrl(QUrl('file://' + self.cacheDir + os.path.sep + 'index.html'))
-        
-        self.wb.page().mainFrame().javaScriptWindowObjectCleared.connect(
-                self.populateJavaScriptWindowObject)
 
     # Parse arguments
     def parse_args(self):
@@ -96,13 +103,17 @@ class phpCliBrowser(QMainWindow):
     def populateJavaScriptWindowObject(self):
         self.wb.page().mainFrame().addToJavaScriptWindowObject(
                 'phpCliBrowser', self)
+        
+    # Injects scripts to forms and links to rewrite behavior and call python functions:
+    def injectJSLinksFormsRewrite(self):
         formElements = self.wb.page().mainFrame().findAllElements('form')
         if formElements:
             for f in formElements:
                 if not f.hasAttribute('onsubmit'):
                     f.setAttribute('onsubmit', "phpCliBrowser.submit(this);return false;")
                 else:
-                    print(onsubmit)
+                    print(f.evaluateJavaScript('this.onsubmit'))
+                    
         aElements = self.wb.page().mainFrame().findAllElements('a')
         if aElements:
             for a in aElements:
@@ -110,11 +121,22 @@ class phpCliBrowser(QMainWindow):
                     href = a.evaluateJavaScript('this.href')
                     a.setAttribute('href', 'javascript:phpCliBrowser.goto("' + href + '");')
 
+    def cachePageQuery(self, dest):
+        parts = dest.split('?')
+        if len(parts) > 1:
+            filename = self.cacheDir + os.path.sep + 'query'
+            with open(filename, 'w') as f:
+                f.write(parts[1].replace('"', '\\"'))
+
     # Provides java script function to replace hrefs of A tags.
     @pyqtSlot(str)
     def goto(self, dest):
         parts = dest.split('?')
         if len(parts) > 1:
+            fname = 'query'
+            dest = self.cacheDir + os.path.sep + '' + fname
+            os.system('echo "' + parts[1] + '" > ' + dest);
+            """
             fname = 'get.php'
             dest = self.cacheDir + os.path.sep + '' + fname
             os.system('echo "<?php" > ' + dest)
@@ -129,47 +151,62 @@ class phpCliBrowser(QMainWindow):
                     os.system('echo "   \'' + gg[0] + '\' => \\"\\"," >> ' + dest)
             os.system('echo ");" >> ' + dest)
             os.system('echo "?>" >> ' + dest)
+            """
         self.outputPhpScript(parts[0])
-
 
     # Provides java script function to read form fields and translate values to php array.
     @pyqtSlot(QWebElement)
     def submit(self, el):
-        inputs = el.findAll('input')
-        act = el.evaluateJavaScript('this.action')
-        vals = {}
-        for i in inputs:
-            elType = i.evaluateJavaScript('this.type');
-            elName = i.evaluateJavaScript('this.name');
-            elVal = i.evaluateJavaScript('this.value');
-            if not elVal:
-                elVal = False
-            if (elType == 'radio'):
-                if (i.evaluateJavaScript('this.checked')):
-                    if (elVal):
-                        vals[elName] = elVal
-            elif elType == 'checkbox':
-                if (i.evaluateJavaScript('this.checked')):
-                    if elVal:
-                        vals[elName] = elVal
-                    else:
-                        vals[elName] = True
-                else:
-                    vals[elName] = False
-            elif not elType or elType == 'submit':
-                pass
-            else:
-                vals[elName] = elVal
 
-        self.savePostVars(vals)
+        js = 'els=new Array();for(i=0;i<this.elements.length;i++) els[els.length] = this.elements[i].name; return els;'
+        
+        nm = 'something'
+        i = 0;
+        data = ''
+        while nm != '':
+            strElmt = 'this.elements[' + str(i) + ']'
+            tp = el.evaluateJavaScript(strElmt + '.type')
+            nm = el.evaluateJavaScript(strElmt + '.name')
+            val = el.evaluateJavaScript(strElmt + '.value')
+            if tp == 'textarea':
+                data += '<!CDATA+++ textarea start:' + nm + "\n" + val + "\n >>textarea end]]+++>\n"
+            elif tp == 'radio':
+                chkd = el.evaluateJavaScript(strElmt + '.checked')
+                if (chkd):
+                    data += 'FLD:' + nm + '=' + val + "\n"
+            elif tp == 'checkbox':
+                chkd = el.evaluateJavaScript(strElmt + '.checked')
+                if (chkd):
+                    if val:
+                        data += 'FLD:' + nm + '=' + val + "\n"
+                    else:
+                        data += 'FLD:' + nm + '=1' + "\n"
+                else:
+                    data += 'FLD:' + nm + '=0' + "\n"
+
+            else:
+                data += 'FLD:' + nm + '=' + val + "\n"
+            i = i+1
+
+        formMethod = el.evaluateJavaScript('this.method')
+        if not formMethod or formMethod.lower() != 'post':
+            formMethod = 'get'
+        formMethod = formMethod.lower()
+            
+        filename = self.cacheDir + os.path.sep + '' + formMethod
+
+        with open(filename, 'w') as f:
+            f.write(data)
+
+        act = el.evaluateJavaScript('this.action')
         self.outputPhpScript(act)
 
     # Saves variables posted by forms:
-    def savePostVars(self, vals):
-        fname = 'post.php'
+    def saveFormSentVars(self, vals, method = 'get'):
+        fname = method.lower() + '.php'
         dest = self.cacheDir + os.path.sep + '' + fname
         os.system('echo "<?php" > ' + dest)
-        os.system('echo "\$_POST = array(" >> ' + dest)
+        os.system('echo "\$_' + method.upper() + ' = array(" >> ' + dest)
         for k, v in vals.items():
             os.system('echo "   \'' + k + '\' => \\"' + str(v) + '\\"", >> ' + dest)
         os.system('echo ");" >> ' + dest)
