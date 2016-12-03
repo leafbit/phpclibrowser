@@ -2,7 +2,7 @@
 global $_SESSION, $_POST;
 $_POST = array();
 
-$session_file = dirname(__FILE__) . '/default.session';
+$session_file = dirname(__FILE__) . '/' . SESSION_KEY;
 $post_file = dirname(__FILE__) . '/post';
 $get_file = dirname(__FILE__) . '/get';
 $query_file = dirname(__FILE__) . '/query';

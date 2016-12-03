@@ -57,3 +57,8 @@ The constants:
 
 `PHP_SCRIPT_PATH` - point to php script directory.
 `BROWSER_PATH` - point to browser path directory.
+
+## Known Limitations and Issues
+
+File field in forms does not work as expected. Is impossible to get the selected file path.
+Java script and form submission may work different from expected.

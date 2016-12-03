@@ -1,6 +1,7 @@
 <html>
 <head>
-  <title>PHP CLI Broser Scirpt Example</title>
+  <title>PHP CLI Browser Scirpt Example</title>
+  <link rel="icon" type="img/ico" href="icon.ico">
   <style>
   .message {
     border: 1px solid green;
@@ -21,16 +22,21 @@ function show_message($text, $vals) {
 // If anything send by $_POST or $_GET - show:
 show_message('A post event received. It contains:', $_POST);
 show_message('A get event received. It contains:', $_GET);
-echo '<p>A random number: ' . rand(0, 999999) . '</p>';
+
+print '<h2>Session test:</h2>';
+echo '<p>Preview page random: ' . (isset($_SESSION['random']) ? $_SESSION['random'] : 'none') . '</p>';
+$_SESSION['random'] = rand(0, 999999);
+echo '<p>A random number: ' . $_SESSION['random'] . '</p>';
 ?>
-
+<h2>Local Images Test</h2>
+<img src="image.jpg" />
+<h2>Links test</h2>
 <p>
-<a href="index.php?argument=daa&andarg=noo">Test Link</a> - click on this link to test get method.
+<a href="index.php?argument=daa&andarg=noo">Local PHP Script Link</a> - click on this link to test get method. <br />
+<a href="http://www.google.com">www.google.com</a> - external link.<br />
 </p>
 
-<p>
-  An example of form to test GET method:
-</p>
+<h2>Form Example - GET</h2>
     <form action="index.php">
     <table>
     <tbody>
@@ -87,9 +93,8 @@ So what?
     </table>
     <input type="submit" value="Submit this now!">
     </form>
-<p>
-  An example of form to test POST method:
-</p>
+
+<h2>Form Example - POST</h2>
     <form action="index.php" method="POST" enctype="multipart/form-data">
      <table>
     <tbody>

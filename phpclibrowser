@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 from PyQt5.QtCore import *
-from PyQt5.QtGui import QKeySequence
+from PyQt5.QtGui import QKeySequence, QIcon
 from PyQt5.QtWidgets import (QAction, QApplication, QMainWindow, QMessageBox,
         QWidget, QVBoxLayout)
 from PyQt5.QtWebKitWidgets import QWebPage, QWebView
@@ -12,6 +12,7 @@ import os
 import sys
 import subprocess
 import argparse
+import re
 
 class phpCliBrowser(QMainWindow):
 
@@ -45,24 +46,58 @@ class phpCliBrowser(QMainWindow):
         # Read program's command line arguments
         self.parse_args()
 
+        self.uriCache = 'file://' + self.cacheDir + os.path.sep
+
         # Start browser window pointing to php program index
         self.wb = QWebView(self)
         self.wb.loadFinished.connect(self.onLoadFinished)
         self.outputPhpScript(self.index)
 
+        # Set initial icon if exists in the php script directory:
+        #self.iconPath = self.scriptDir + os.path.sep + 'icon.ico'
+        #if os.path.isfile(self.iconPath):
+         #   self.setWindowIcon(QIcon(self.iconPath))
+            
         self.setCentralWidget(self.wb)
 
     # Checks if php link is available in the PHP script directory.
     def isPhpAvailable(self, phpFileName):
-        src = phpFileName.replace('file://' + self.cacheDir + os.path.sep, '')
+        src = phpFileName.replace(self.uriCache, '')
         fullPath = self.scriptDir + os.path.sep + src
         if os.path.isfile(fullPath):
             return fullPath
         return False
 
+    def isLocalFile(self, path):
+        return path[:len(self.uriCache)] == self.uriCache
+        #return path.startswith('file://' + self.cacheDir + os.path.sep, path)
+
+    def getRealLocalPath(self, path):
+        if self.isLocalFile(path):
+            rezPth = self.scriptDir + os.path.sep
+            rezPth += path.replace('file://' + self.cacheDir + os.path.sep, '')
+            return rezPth
+        return False
+
     def onLoadFinished(self): 
         self.wb.page().mainFrame().javaScriptWindowObjectCleared.connect(
                 self.populateJavaScriptWindowObject)
+
+        # find Icon to display:
+        elIcon = self.wb.page().mainFrame().findFirstElement('link[rel=icon]')
+        if elIcon:
+            iconPath = elIcon.evaluateJavaScript('this.href')
+            if iconPath and self.isLocalFile(iconPath):
+                realIconPath = self.getRealLocalPath(iconPath)
+                if realIconPath:
+                    self.setWindowIcon(QIcon(realIconPath))
+
+        elTitle = self.wb.page().mainFrame().findFirstElement('title')
+        if elTitle:
+            strTitle = elTitle.toPlainText()
+        else:
+            strTitle = 'Untitled'
+        self.setWindowTitle(strTitle)
         
         self.injectJSLinksFormsRewrite()
 
@@ -73,6 +108,7 @@ class phpCliBrowser(QMainWindow):
         sessionFile = self.cacheDir + os.path.sep + '' + self.session_file_name;
         if fullPath:
             php = 'define(\'PHP_SCRIPT_PATH\', \\"'+self.scriptDir+'\\"); define(\'BROWSER_PATH\', \\"'+self.browserDir+'\\");'
+            php += 'define(\'SESSION_KEY\', \\"'+self.session_file_name+'\\");'
             php += 'require(\'' + globalsPath + '\'); include(\'' + fullPath + '\');'
             php += 'file_put_contents(\'' + sessionFile + '\', serialize(\$_SESSION));';
             cmd = 'php -r "' + php + '"'
@@ -109,6 +145,13 @@ class phpCliBrowser(QMainWindow):
         formElements = self.wb.page().mainFrame().findAllElements('form')
         if formElements:
             for f in formElements:
+                # Only forms that have action attribute will be altered.
+                if not f.hasAttribute('action'):
+                    continue
+                # Only forms that have their action pointing to local php script will be altered.
+                act = f.evaluateJavaScript('this.action')
+                if not self.isLocalFile(act):
+                    continue
                 if not f.hasAttribute('onsubmit'):
                     f.setAttribute('onsubmit', "phpCliBrowser.submit(this);return false;")
                 else:
@@ -119,8 +162,20 @@ class phpCliBrowser(QMainWindow):
             for a in aElements:
                 if a.hasAttribute('href'):
                     href = a.evaluateJavaScript('this.href')
-                    a.setAttribute('href', 'javascript:phpCliBrowser.goto("' + href + '");')
+                    localPath = self.getRealLocalPath(href)
+                    if localPath:
+                        a.setAttribute('href', 'javascript:phpCliBrowser.goto("' + href + '");')
+        # fix images:
+        images = self.wb.page().mainFrame().findAllElements('img')
+        if (images):
+            for im in images:
+                if im.hasAttribute('src'):
+                    src = im.evaluateJavaScript('this.src')
+                    localPath = self.getRealLocalPath(src)
+                    if localPath:
+                        im.setAttribute('src', localPath)
 
+    # Puts raw query string into a file
     def cachePageQuery(self, dest):
         parts = dest.split('?')
         if len(parts) > 1:
@@ -136,30 +191,11 @@ class phpCliBrowser(QMainWindow):
             fname = 'query'
             dest = self.cacheDir + os.path.sep + '' + fname
             os.system('echo "' + parts[1] + '" > ' + dest);
-            """
-            fname = 'get.php'
-            dest = self.cacheDir + os.path.sep + '' + fname
-            os.system('echo "<?php" > ' + dest)
-            os.system('echo "\$_GET = array(" >> ' + dest)
-            args = parts[1].split('#')
-            args = args[0].split('&')
-            for g in args:
-                gg = g.split("=")
-                if len(gg) > 1:
-                    os.system('echo "   \'' + gg[0] + '\' => \\"' +gg[1]+ '\\"," >> ' + dest)
-                else:
-                    os.system('echo "   \'' + gg[0] + '\' => \\"\\"," >> ' + dest)
-            os.system('echo ");" >> ' + dest)
-            os.system('echo "?>" >> ' + dest)
-            """
         self.outputPhpScript(parts[0])
 
     # Provides java script function to read form fields and translate values to php array.
     @pyqtSlot(QWebElement)
     def submit(self, el):
-
-        js = 'els=new Array();for(i=0;i<this.elements.length;i++) els[els.length] = this.elements[i].name; return els;'
-        
         nm = 'something'
         i = 0;
         data = ''
@@ -168,12 +204,15 @@ class phpCliBrowser(QMainWindow):
             tp = el.evaluateJavaScript(strElmt + '.type')
             nm = el.evaluateJavaScript(strElmt + '.name')
             val = el.evaluateJavaScript(strElmt + '.value')
+            
             if tp == 'textarea':
                 data += '<!CDATA+++ textarea start:' + nm + "\n" + val + "\n >>textarea end]]+++>\n"
+
             elif tp == 'radio':
                 chkd = el.evaluateJavaScript(strElmt + '.checked')
                 if (chkd):
                     data += 'FLD:' + nm + '=' + val + "\n"
+
             elif tp == 'checkbox':
                 chkd = el.evaluateJavaScript(strElmt + '.checked')
                 if (chkd):
@@ -201,17 +240,6 @@ class phpCliBrowser(QMainWindow):
         act = el.evaluateJavaScript('this.action')
         self.outputPhpScript(act)
 
-    # Saves variables posted by forms:
-    def saveFormSentVars(self, vals, method = 'get'):
-        fname = method.lower() + '.php'
-        dest = self.cacheDir + os.path.sep + '' + fname
-        os.system('echo "<?php" > ' + dest)
-        os.system('echo "\$_' + method.upper() + ' = array(" >> ' + dest)
-        for k, v in vals.items():
-            os.system('echo "   \'' + k + '\' => \\"' + str(v) + '\\"", >> ' + dest)
-        os.system('echo ");" >> ' + dest)
-        os.system('echo "?>" >> ' + dest)
-
 if __name__ == '__main__':
 
     import sys
@@ -219,7 +247,7 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
 
     mainWindow = phpCliBrowser()
-    mainWindow.setWindowTitle("PHP Browser")
+    # mainWindow.setWindowTitle("PHP Browser")
     mainWindow.show()
 
     sys.exit(app.exec_())
