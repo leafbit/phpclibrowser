@@ -1,0 +1,8 @@
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: PHPCLIBrowser
+Upstream-Contact: Dorian Chibuc <srv023@leafbit.com>
+Source: http://github.com/leafbit/phpclibrowser
+
+Files: *
+Copyright: 2016 LeafBit
+License: GPL-2+

@@ -1,0 +1,24 @@
+#!/bin/bash
+SCRIPT_SRC="src"
+UTIL_FILES="util"
+PROG_NAME="phpclibrowser"
+
+CURRENT_VERSION="1.0"
+
+DOC_DIR_NAME="$SCRIPT_SRC/usr/share/doc/$PROG_NAME"
+[ ! -d "$DOC_DIR_NAME" ] && mkdir -p "$DOC_DIR_NAME"
+
+changelogFile="$DOC_DIR_NAME/changelog.Debian"
+cp "$UTIL_FILES/changelog.Debian" "$changelogFile" 
+gzip --best -n "$changelogFile"
+chmod 0644 "$changelogFile.gz"
+
+manFile="$SCRIPT_SRC/usr/share/man/man1/phpclibrowser.1"
+cp "$UTIL_FILES/phpclibrowser.1" "$manFile"
+gzip --best -n "$manFile"
+chmod 0644 "$manFile.gz"
+
+U="_"
+pkgName="$PROG_NAME$U$CURRENT_VERSION.deb"
+fakeroot dpkg-deb --build "$SCRIPT_SRC" "$pkgName" 
+lintian "$pkgName"
