@@ -105,13 +105,22 @@ class phpCliBrowser(QMainWindow):
     def outputPhpScript(self, phpFileName):
         fullPath = self.isPhpAvailable(phpFileName)
         globalsPath = self.cacheDir + os.path.sep + 'globals.php';
+        tempScript = self.cacheDir + os.path.sep + '/temp.php';
         sessionFile = self.cacheDir + os.path.sep + '' + self.session_file_name;
         if fullPath:
             php = 'define(\'PHP_SCRIPT_PATH\', \\"'+self.scriptDir+'\\"); define(\'BROWSER_PATH\', \\"'+self.browserDir+'\\");'
             php += 'define(\'SESSION_KEY\', \\"'+self.session_file_name+'\\");'
             php += 'require(\'' + globalsPath + '\'); include(\'' + fullPath + '\');'
             php += 'file_put_contents(\'' + sessionFile + '\', serialize(\$_SESSION));';
-            cmd = 'php -r "' + php + '"'
+
+            php = 'define(\'PHP_SCRIPT_PATH\', "'+self.scriptDir+'"); define(\'BROWSER_PATH\', "'+self.browserDir+'");'
+            php += "\n" + 'define(\'SESSION_KEY\', "'+self.session_file_name+'");'
+            php += "\n" + 'require(\'' + globalsPath + '\'); include(\'' + fullPath + '\');'
+            php += "\n" + 'file_put_contents(\'' + sessionFile + '\', serialize($_SESSION));';
+            
+            with open(tempScript, 'w') as f:
+                f.write('<?php ' + php + ' ?>');
+            cmd = 'php -f "' + tempScript + '"' + self.scriptParams
             self.parseBash(cmd)
         else:
             self.parseBash('echo "Cannot find file \'' + phpFileName + '\'"')
@@ -121,14 +130,16 @@ class phpCliBrowser(QMainWindow):
     # Parse arguments
     def parse_args(self):
         p = argparse.ArgumentParser()
-        p.add_argument('-s', default=self.scriptDir + os.path.sep + 'example', help="Directory from where php script is served")
+        p.add_argument('-s', default='/usr/share/phpclibrowser/example', help="Directory from where php script is served")
         p.add_argument('-d', default=self.cwd, help="Program working directory")
         p.add_argument('-i', default='index.php', help="Index file for php source")
         p.add_argument('-k', default='default.session', help="Session file name")
+        p.add_argument('-p', default='', help="Script params")
         args = p.parse_args()
         self.scriptDir = args.s
         self.cwd = args.d
         self.index = args.i
+        self.scriptParams = ' -- ' + args.p
         self.session_file_name = args.k
 
     # Executes a bash command and outputs the result into index.html cache file
@@ -182,6 +193,10 @@ class phpCliBrowser(QMainWindow):
             filename = self.cacheDir + os.path.sep + 'query'
             with open(filename, 'w') as f:
                 f.write(parts[1].replace('"', '\\"'))
+
+    @pyqtSlot()
+    def closeWindow(self):
+        self.close()
 
     # Provides java script function to replace hrefs of A tags.
     @pyqtSlot(str)
